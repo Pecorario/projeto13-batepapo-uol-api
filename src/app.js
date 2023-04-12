@@ -37,14 +37,13 @@ app.post('/participants', async (req, res) => {
     });
     const participant = await db
       .collection('participants')
-      .find({ name: req.body.name })
-      .toArray();
+      .findOne({ name: req.body.name });
 
     if (validation.error) {
       return res.sendStatus(422);
     }
 
-    if (participant.length !== 0) {
+    if (participant) {
       return res.sendStatus(409);
     }
 
@@ -81,16 +80,13 @@ app.post('/messages', async (req, res) => {
 
     const participant = await db
       .collection('participants')
-      .find({ name: user })
-      .toArray();
-
-    console.log('participant', participant);
+      .findOne({ name: user });
 
     const validation = messageSchema.validate(req.body, {
       abortEarly: true
     });
 
-    if (validation.error || participant.length === 0) {
+    if (validation.error || !participant) {
       return res.sendStatus(422);
     }
 
@@ -135,6 +131,55 @@ app.get('/messages', async (req, res) => {
     return res.status(500).send(error.message);
   }
 });
+
+app.post('/status', async (req, res) => {
+  try {
+    const { user } = req.headers;
+
+    const participant = await db
+      .collection('participants')
+      .findOne({ name: user });
+
+    if (!user || !participant) {
+      return res.sendStatus(404);
+    }
+
+    await db
+      .collection('participants')
+      .updateOne({ name: user }, { $set: { lastStatus: Date.now() } });
+
+    return res.sendStatus(200);
+  } catch (error) {
+    return res.status(500).send(error.message);
+  }
+});
+
+setInterval(async () => {
+  try {
+    const inactive = Date.now() - 10000;
+
+    const response = await db
+      .collection('participants')
+      .find({ lastStatus: { $lt: inactive } })
+      .toArray();
+
+    await db
+      .collection('participants')
+      .deleteMany({ lastStatus: { $lt: inactive } });
+
+    await response.forEach(async item => {
+      await db.collection('messages').insertOne({
+        from: item.name,
+        to: 'Todos',
+        text: 'sai da sala...',
+        type: 'status',
+        time: dayjs().format('HH:mm:ss')
+      });
+    });
+  } catch (error) {
+    console.log(error);
+  }
+}, 15000);
 
 const PORT = 5000;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
