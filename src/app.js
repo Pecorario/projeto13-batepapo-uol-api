@@ -27,7 +27,7 @@ const participantSchema = joi.object({
 const messageSchema = joi.object({
   to: joi.string().required(),
   text: joi.string().required(),
-  type: joi.string().required()
+  type: joi.string().valid('message', 'private_message').required()
 });
 
 app.post('/participants', async (req, res) => {
@@ -35,13 +35,16 @@ app.post('/participants', async (req, res) => {
     const validation = participantSchema.validate(req.body, {
       abortEarly: true
     });
-    const participants = await db.collection('participants').find().toArray();
+    const participant = await db
+      .collection('participants')
+      .find({ name: req.body.name })
+      .toArray();
 
     if (validation.error) {
       return res.sendStatus(422);
     }
 
-    if (participants.find(participant => participant.name === req.body.name)) {
+    if (participant.length !== 0) {
       return res.sendStatus(409);
     }
 
@@ -72,9 +75,60 @@ app.get('/participants', async (req, res) => {
   }
 });
 
+app.post('/messages', async (req, res) => {
+  try {
+    const { user } = req.headers;
+
+    const participant = await db
+      .collection('participants')
+      .find({ name: user })
+      .toArray();
+
+    console.log('participant', participant);
+
+    const validation = messageSchema.validate(req.body, {
+      abortEarly: true
+    });
+
+    if (validation.error || participant.length === 0) {
+      return res.sendStatus(422);
+    }
+
+    await db.collection('messages').insertOne({
+      from: user,
+      ...req.body,
+      time: dayjs().format('HH:mm:ss')
+    });
+    return res.sendStatus(201);
+  } catch (error) {
+    return res.status(500).send(error.message);
+  }
+});
+
 app.get('/messages', async (req, res) => {
   try {
-    const data = await db.collection('messages').find().toArray();
+    const { user } = req.headers;
+    const { limit } = req.query;
+
+    const data = await db
+      .collection('messages')
+      .find({
+        $or: [
+          { to: 'Todos' },
+          { to: user },
+          { from: user },
+          { type: 'message' }
+        ]
+      })
+      .toArray();
+
+    if (limit && (isNaN(limit) || limit <= 0)) {
+      return res.sendStatus(422);
+    }
+
+    if (limit) {
+      return res.send(data.slice(-limit));
+    }
 
     return res.send(data);
   } catch (error) {
